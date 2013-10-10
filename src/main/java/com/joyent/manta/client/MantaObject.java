@@ -8,12 +8,14 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.Serializable;
 
 import org.apache.commons.io.FileUtils;
 
 import com.google.api.client.http.HttpHeaders;
 import com.google.api.client.util.Key;
+import com.google.common.io.ByteStreams;
 
 /**
  * A Manta storage object.
@@ -81,6 +83,8 @@ public class MantaObject implements Serializable {
 
     private String dataInputString_;
 
+    private StreamWriter streamWriter_;
+    
     private HttpHeaders httpHeaders_;
 
     /**
@@ -111,7 +115,7 @@ public class MantaObject implements Serializable {
      */
     public MantaObject(String path, HttpHeaders headers) {
         path_ = path;
-        httpHeaders_ = headers;
+        setHttpHeaders(headers);
     }
 
     /*
@@ -141,6 +145,11 @@ public class MantaObject implements Serializable {
             if (other.dataInputFile_ != null)
                 return false;
         } else if (!dataInputFile_.equals(other.dataInputFile_))
+            return false;
+        if (streamWriter_ == null) {
+            if (other.streamWriter_ != null)
+                return false;
+        } else if (!streamWriter_.equals(other.streamWriter_))
             return false;
         if (dataInputStream_ == null) {
             if (other.dataInputStream_ != null)
@@ -198,6 +207,25 @@ public class MantaObject implements Serializable {
         return dataInputFile_;
     }
 
+    public final void setStreamWriter(StreamWriter streamWriter) {
+        this.streamWriter_ = streamWriter;
+    }
+    public final StreamWriter getStreamWriter() throws IOException {
+        if (null == streamWriter_) {
+            final InputStream dataInputStream = getDataInputStream();
+            if (null != dataInputStream) {
+                streamWriter_ = new StreamWriter() {
+                    @Override
+                    public void write(OutputStream out) throws IOException {
+                        ByteStreams.copy(dataInputStream, out);
+                    }
+                };
+            }
+        }
+        
+        return streamWriter_;
+    }
+    
     /**
      * Returns an {@link InputStream} containing this object's data, or null if there is no data associated with this
      * object.
@@ -335,6 +363,9 @@ public class MantaObject implements Serializable {
      *            the field value.
      */
     public final void setHeader(String fieldName, Object value) {
+        if (null == httpHeaders_) {
+            httpHeaders_ = new HttpHeaders();
+        }
         this.httpHeaders_.set(fieldName, value);
     }
 
@@ -347,6 +378,26 @@ public class MantaObject implements Serializable {
      */
     public final void setHttpHeaders(HttpHeaders httpHeaders) {
         this.httpHeaders_ = httpHeaders;
+        extractMetadata(httpHeaders);
+    }
+
+    /**
+     * Get the available Metadata out of the HttpHeaders.
+     * @see path_
+     * @see contentLength_
+     * @see contentType_
+     * @see etag_
+     * @see mtime_
+     */
+    protected void extractMetadata(HttpHeaders httpHeaders) {
+        if (null == httpHeaders) {
+            // Nothing to find.
+            return;
+        }
+        contentLength_ = httpHeaders.getContentLength();
+        contentType_ = httpHeaders.getContentType();
+        etag_ = httpHeaders.getETag();
+        mtime_ = httpHeaders.getLastModified();
     }
 
     /**

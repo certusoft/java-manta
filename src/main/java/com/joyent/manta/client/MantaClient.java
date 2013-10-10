@@ -309,7 +309,9 @@ public class MantaClient {
             contentType = object.getHttpHeaders().getContentType();
         }
         HttpContent content = null;
-        if (object.getDataInputStream() != null) {
+        if (object.getStreamWriter() != null) {
+            content = new StreamWriterContent(contentType, object.getStreamWriter());
+        } else if (object.getDataInputStream() != null) {
             content = new InputStreamContent(contentType, object.getDataInputStream());
         } else if (object.getDataInputFile() != null) {
             content = new FileContent(contentType, object.getDataInputFile());
@@ -431,4 +433,5 @@ public class MantaClient {
         }
         return encodedPath.toString();
     }
+
 }
