@@ -4,15 +4,21 @@
 package com.joyent.manta.client.crypto;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.security.InvalidKeyException;
 import java.security.KeyPair;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
 import java.security.Security;
 import java.security.Signature;
 import java.security.SignatureException;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.InvalidKeySpecException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
@@ -30,8 +36,9 @@ import com.joyent.manta.exception.MantaCryptoException;
 
 /**
  * Joyent HTTP authorization signer. This adheres to the specs of the node-http-signature spec.
- * 
+ *
  * @author Yunong Xiao
+ * @author Bill Headrick
  */
 public class HttpSigner {
     private static final Log LOG = LogFactory.getLog(HttpSigner.class);
@@ -45,12 +52,13 @@ public class HttpSigner {
     /**
      * Returns a new {@link HttpSigner} instance that can be used to sign and verify requests according to the
      * joyent-http-signature spec.
-     * 
+     *
      * @see <a href="http://github.com/joyent/node-http-signature/blob/master/http_signing.md">node-http-signature</a>
      * @param keyPath
      *            The path to the rsa key on disk.
      * @param fingerPrint
-     *            The fingerprint of the rsa key.
+     *            (optional) The fingerprint of the rsa key.  If the keyPath is a valid RSA key, the fingerprint will be
+     *            calculated from the public part of the Key.
      * @param login
      *            The login of the user account.
      * @return An instance of {@link HttpSigner}.
@@ -61,40 +69,113 @@ public class HttpSigner {
         return new HttpSigner(keyPath, fingerPrint, login);
     }
 
-    final KeyPair keyPair_;
+    private KeyPair keyPair_;
     private final String login_;
 
-    private final String fingerPrint_;
+    private String fingerPrint_;
 
     /**
      * @param keyPath
+     * @param fingerprint
+     * @param login
      * @throws IOException
+     * @throws InvalidKeySpecException
+     * @throws NoSuchAlgorithmException
      */
     private HttpSigner(String keyPath, String fingerprint, String login) throws IOException {
-        LOG.debug(String.format("initializing HttpSigner with keypath: %s, fingerprint: %s, login: %s", keyPath,
-                                fingerprint, login));
+        LOG.debug(String.format("initializing HttpSigner with keypath: %s, fingerprint: %s, login: %s", keyPath, fingerprint, login));
         fingerPrint_ = fingerprint;
         login_ = login;
-        keyPair_ = getKeyPair(keyPath);
+        updateKeyPair(keyPath);
     }
 
     /**
+     * Update the KeyPair (and possibly the fingerprint) for the signer.
+     *
      * @param keyPath
-     * @return
      * @throws IOException
+     * @throws NoSuchAlgorithmException
+     * @throws InvalidKeySpecException
      */
-    private final KeyPair getKeyPair(String keyPath) throws IOException {
+    private void updateKeyPair(String keyPath) throws IOException {
         BufferedReader br = new BufferedReader(new FileReader(keyPath));
         Security.addProvider(new BouncyCastleProvider());
         PEMReader pemReader = new PEMReader(br);
         KeyPair kp = (KeyPair) pemReader.readObject();
         pemReader.close();
-        return kp;
+
+        PublicKey publicKey = kp.getPublic();
+        // If the key is RSA, calculate the fingerprint of the public key.
+        if (publicKey.getAlgorithm().equalsIgnoreCase("RSA")) {
+            // Calculate the fingerprint for the public key...
+            RSAPublicKey rsaPublicKey = (RSAPublicKey) publicKey;
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream dos = new DataOutputStream(baos);
+            dos.writeInt("ssh-rsa".getBytes().length);
+            dos.write("ssh-rsa".getBytes());
+
+            byte[] publicExponent = rsaPublicKey.getPublicExponent().toByteArray();
+            byte[] modulus = rsaPublicKey.getModulus().toByteArray();
+
+            dos.writeInt(publicExponent.length);
+            dos.write(publicExponent);
+            dos.writeInt(modulus.length);
+            dos.write(modulus);
+
+            byte [] barr = baos.toByteArray();
+            String calculatedFingerprint1 = getFingerprint(barr);
+            LOG.debug("Calculated Fingerprint " + calculatedFingerprint1);
+            fingerPrint_ = calculatedFingerprint1;
+        }
+
+        keyPair_ = kp;
     }
 
+    private String getFingerprint(byte[] barr) {
+        String digestAlgName = "MD5";
+        MessageDigest alg = null;
+        try {
+            alg = MessageDigest.getInstance(digestAlgName);
+        }
+        catch (NoSuchAlgorithmException e) {
+            throw new IllegalArgumentException("invalid signature digest algorithm: " + digestAlgName, e);
+        }
+        byte[] digest = alg.digest(barr);
+        String hx = getHexString(digest, ":");
+        return hx;
+    }
+    private static final char[] hexChar = {
+        '0' , '1' , '2' , '3' ,
+        '4' , '5' , '6' , '7' ,
+        '8' , '9' , 'a' , 'b' ,
+        'c' , 'd' , 'e' , 'f'
+    };
+
+    private static String getHexString(byte[] barr, String separator) {
+        return getHexString(barr, separator, 0, barr.length);
+    }
+    private static String getHexString(byte[] barr, String separator, int startIdx, int length) {
+        if (null == barr || 0 == length) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        int start = startIdx;
+        int end = startIdx + length;
+        for (int i=start; i<end; i++) {
+            if (null != separator && i != start) {
+                sb.append(separator);
+            }
+            // look up high char
+            sb.append(hexChar[(barr[i] & 0xf0) >>> 4]); // fill left with zero bits
+
+            // look up low char
+            sb.append(hexChar[barr[i] & 0x0f]);
+        }
+        return sb.toString();
+    }
     /**
      * Sign an {@link HttpRequest}.
-     * 
+     *
      * @param request
      *            The {@link HttpRequest} to sign.
      * @throws MantaCryptoException
@@ -131,7 +212,7 @@ public class HttpSigner {
 
     /**
      * Verify a signed {@link HttpRequest}.
-     * 
+     *
      * @param request
      *            The signed {@link HttpRequest}.
      * @return True if the request is valid, false if not.
