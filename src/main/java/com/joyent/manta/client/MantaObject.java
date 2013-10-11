@@ -65,6 +65,9 @@ public class MantaObject implements Serializable {
     @Key("size")
     private Long contentLength_;
 
+    @Key("md5")
+    private String contentMD5_;
+
     @Key("type")
     private String contentType_;
 
@@ -136,6 +139,11 @@ public class MantaObject implements Serializable {
                 return false;
         } else if (!contentLength_.equals(other.contentLength_))
             return false;
+        if (contentMD5_ == null) {
+            if (other.contentMD5_ != null)
+                return false;
+        } else if (!contentMD5_.equals(other.contentMD5_))
+            return false;
         if (contentType_ == null) {
             if (other.contentType_ != null)
                 return false;
@@ -189,6 +197,13 @@ public class MantaObject implements Serializable {
      */
     public final Long getContentLength() {
         return contentLength_;
+    }
+
+    /**
+     * @return the MD5
+     */
+    public final String getContentMD5() {
+        return contentMD5_;
     }
 
     /**
@@ -312,6 +327,7 @@ public class MantaObject implements Serializable {
         final int prime = 31;
         int result = 1;
         result = prime * result + ((contentLength_ == null) ? 0 : contentLength_.hashCode());
+        result = prime * result + ((contentMD5_ == null) ? 0 : contentMD5_.hashCode());
         result = prime * result + ((contentType_ == null) ? 0 : contentType_.hashCode());
         result = prime * result + ((dataInputFile_ == null) ? 0 : dataInputFile_.hashCode());
         result = prime * result + ((dataInputStream_ == null) ? 0 : dataInputStream_.hashCode());
@@ -385,6 +401,7 @@ public class MantaObject implements Serializable {
      * Get the available Metadata out of the HttpHeaders.
      * @see path_
      * @see contentLength_
+     * @see contentMD5_
      * @see contentType_
      * @see etag_
      * @see mtime_
@@ -395,6 +412,7 @@ public class MantaObject implements Serializable {
             return;
         }
         contentLength_ = httpHeaders.getContentLength();
+        contentMD5_ = httpHeaders.getContentMD5();
         contentType_ = httpHeaders.getContentType();
         etag_ = httpHeaders.getETag();
         mtime_ = httpHeaders.getLastModified();
@@ -415,7 +433,9 @@ public class MantaObject implements Serializable {
     @Override
     public String toString() {
         StringBuilder builder = new StringBuilder();
-        builder.append("MantaObject [path_=").append(path_).append(", contentLength_=").append(contentLength_)
+        builder.append("MantaObject [path_=").append(path_)
+                .append(", contentLength_=").append(contentLength_)
+                .append(", contentMD5_=").append(contentMD5_)
                 .append(", contentType_=").append(contentType_).append(", etag_=").append(etag_).append(", mtime_=")
                 .append(mtime_).append(", dataInputFile_=").append(dataInputFile_).append(", dataInputStream_=")
                 .append(dataInputStream_).append(", dataInputString_=").append(dataInputString_)
